@@ -1,76 +1,34 @@
 'use strict';
 
 /* ============================================================
-   حافلاتي — البيانات الثابتة (وهمية بالكامل)
+   حافلاتي — لوحة إدارة النقل المدرسي (تطبيق محلي، المدير يتحكم بكل شيء)
+   البيانات محفوظة في localStorage على هذا الجهاز، مع نسخ احتياطي JSON.
    ============================================================ */
 
-const AREAS = ['حلة القلعة', 'حلة البوسعيد', 'حلة الحويمي', 'سور الحديد', 'حلة الشريجة',
-  'حلة آل يوسف', 'حلة الشرادي', 'حلة وادي اللوامي', 'حلة الشخر', 'حلة الصبارة',
-  'حلة البنود', 'وادي اللوامي الساحل بجانب الخيالة', 'حلة وادي اللوامي بجانب مكتب الوالي'];
-
-const BUSES = [
-  { driver: 'عبدالله محمد ناصر الكحالي', plate: '6521', capacity: 66, type: 'كبيرة' },
-  { driver: 'أيمن خلفان سالم الوهيبي', plate: '6743', capacity: 54, type: 'كبيرة' },
-  { driver: 'محمد راشد جمعة الربيعي', plate: '2948', capacity: 66, type: 'كبيرة' },
-  { driver: 'سعيد ناصر صالح الحديدي', plate: '8565', capacity: 29, type: 'متوسطة' },
-  { driver: 'عبدالله عبيد هاشل الدوحاني', plate: '531', capacity: 63, type: 'كبيرة' },
-  { driver: 'أمين شاه مراد صومار الزدجالي', plate: '7141', capacity: 67, type: 'كبيرة' },
-  { driver: 'عامر علي عامر العمري', plate: '436', capacity: 66, type: 'كبيرة' },
-  { driver: 'ماجد حمود سعيد السابقي', plate: '5030', capacity: 29, type: 'متوسطة' },
-  { driver: 'غسان محمد غسان المزروعي', plate: '5790', capacity: 29, type: 'متوسطة' },
-  { driver: 'محمد يوسف سليمان الحمداني', plate: '6735', capacity: 25, type: 'متوسطة' }
-];
-
+/* ---------- ثوابت ---------- */
+const STORAGE_KEY = 'hawafilati-data-v1';
 const GRADES = ['الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع'];
-
-const GRADE_PLAN = [
-  ['الخامس', 1, 37], ['الخامس', 2, 36], ['الخامس', 3, 35], ['الخامس', 4, 35], ['الخامس', 5, 35],
-  ['السادس', 1, 40], ['السادس', 2, 40], ['السادس', 3, 40], ['السادس', 4, 40],
-  ['السابع', 1, 40], ['السابع', 2, 40], ['السابع', 3, 40], ['السابع', 4, 40],
-  ['الثامن', 1, 36], ['الثامن', 2, 35], ['الثامن', 3, 36], ['الثامن', 4, 35], ['الثامن', 5, 34],
-  ['التاسع', 1, 37], ['التاسع', 2, 38], ['التاسع', 3, 37], ['التاسع', 4, 38]
-];
-
 const MODE_LABELS = { government: 'نقل حكومي', private: 'نقل خاص', walk: 'مشيًا', pending: 'غير محدد' };
 const MODES = ['government', 'private', 'walk', 'pending'];
 
-// نسبة التحميل المستهدفة لكل حافلة (لإبقاء هامش أمان)
-const BUS_TARGET_RATIO = 0.87;
-
-const VISIBLE_STEP = 40;
-const STORAGE_KEY = 'hawafilati-demo';
-
-/* ============================================================
-   الحالة العامة
-   ============================================================ */
-
+/* ---------- الحالة ---------- */
 const state = {
   students: [],
-  visible: VISIBLE_STEP,
-  tracking: false,
-  watchId: null
+  buses: [],
+  studentSearch: '',
+  modeFilter: 'all',
+  assignFilter: 'all',
+  editStudentId: null,
+  editBusId: null
 };
 
-/* ============================================================
-   أدوات مساعدة
-   ============================================================ */
-
+/* ---------- أدوات مساعدة ---------- */
 function $(selector, root) {
-  try {
-    return (root || document).querySelector(selector);
-  } catch (e) {
-    console.warn('اختيار غير صالح:', selector, e);
-    return null;
-  }
+  try { return (root || document).querySelector(selector); } catch (e) { return null; }
 }
 
 function $all(selector, root) {
-  try {
-    return Array.prototype.slice.call((root || document).querySelectorAll(selector));
-  } catch (e) {
-    console.warn('اختيار غير صالح:', selector, e);
-    return [];
-  }
+  try { return Array.prototype.slice.call((root || document).querySelectorAll(selector)); } catch (e) { return []; }
 }
 
 function toast(message) {
@@ -82,428 +40,615 @@ function toast(message) {
   toast._timer = setTimeout(() => el.classList.remove('show'), 2300);
 }
 
-function pad(value, length) {
-  return String(value).padStart(length, '0');
+function newId() {
+  return (crypto && crypto.randomUUID) ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2);
 }
 
-/* ============================================================
-   بناء البيانات التجريبية
-   ============================================================ */
+function escapeHtml(text) {
+  return String(text == null ? '' : text)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
-function buildStudents() {
-  const list = [];
-  let serial = 0;
+function findStudent(id) { return state.students.find(s => s.id === id) || null; }
+function findBus(id) { return state.buses.find(b => b.id === id) || null; }
+function busCount(busId) { return state.students.filter(s => s.busId === busId).length; }
+function totalCapacity() { return state.buses.reduce((sum, b) => sum + b.capacity, 0); }
+function enumAreas() { return Array.from(new Set(state.students.map(s => s.area).filter(Boolean))).sort(); }
 
-  for (const [grade, section, count] of GRADE_PLAN) {
-    for (let n = 0; n < count; n++) {
-      serial++;
-      let mode;
-      if (serial <= 430) mode = 'government';
-      else if (serial <= 660) mode = 'private';
-      else if (serial <= 760) mode = 'walk';
-      else mode = 'pending';
+/* ---------- طبقة التخزين ---------- */
+function defaultData() {
+  return { version: 1, students: [], buses: [] };
+}
 
-      list.push({
-        id: 'STU' + pad(serial, 4),
-        name: 'طالب تجريبي ' + pad(serial, 3),
-        grade,
-        section,
-        mode,
-        bus: mode === 'government' ? assignBus(serial - 1) : null,
-        area: AREAS[(serial * 7) % AREAS.length]
-      });
-    }
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return defaultData();
+    const parsed = JSON.parse(raw);
+    return {
+      version: parsed.version || 1,
+      students: Array.isArray(parsed.students) ? parsed.students : [],
+      buses: Array.isArray(parsed.buses) ? parsed.buses : []
+    };
+  } catch (e) {
+    console.warn('تعذر قراءة البيانات المحفوظة:', e);
+    return defaultData();
   }
-  return list;
 }
 
-/**
- * يعيّن حافلة بترتيب المدخلات. تُملأ الحافلات تباعًا حتى نسبتها المستهدفة،
- * ويُوزع الفائض (إن وُجد) دائريًا على حافلات لم تمتلئ بعد، مع احترام السعة
- * الكاملة كحد أقصى. يعيد أقرب حافلة متاحة أو null عند العجز الكامل.
- */
-function assignBus(index) {
-  const targets = BUSES.map(b => Math.floor(b.capacity * BUS_TARGET_RATIO));
-
-  let cursor = 0;
-  for (let i = 0; i < BUSES.length; i++) {
-    if (index >= cursor && index < cursor + targets[i]) return BUSES[i];
-    cursor += targets[i];
+function persist() {
+  const data = { version: 1, students: state.students, buses: state.buses };
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.error('تعذر حفظ البيانات:', e);
+    toast('تحذير: تعذر حفظ البيانات (ملء التخزين الممتلئ)');
   }
-
-  // الفائض عن النسب المستهدفة: وزّع دائريًا على حافلة لا تزال بسعة متاحة،
-  // مع الالتزام دائمًا بألا تتجاوز السعة الكاملة للحافلة.
-  const leftover = index - cursor;
-  for (let step = 0; step < BUSES.length; step++) {
-    const candidate = (leftover + step) % BUSES.length;
-    if (targets[candidate] < BUSES[candidate].capacity) {
-      targets[candidate]++;
-      return BUSES[candidate];
-    }
-  }
-  throw new Error('لا توجد سعة متاحة في أسطول الحافلات');
 }
 
-/* ============================================================
-   الحسابات المجمّعة (تُنفذ مرة واحدة لكل تحديث)
-   ============================================================ */
-
-function totalBusCapacity() {
-  return BUSES.reduce((sum, b) => sum + b.capacity, 0);
-}
-
-function computeStatistics() {
-  const modeCounts = {};
-  MODES.forEach(m => (modeCounts[m] = 0));
-  state.students.forEach(s => (modeCounts[s.mode] = (modeCounts[s.mode] || 0) + 1));
-
-  const busCounts = {};
-  BUSES.forEach(b => (busCounts[b.plate] = 0));
-  state.students.forEach(s => {
-    if (s.bus) busCounts[s.bus.plate] = (busCounts[s.bus.plate] || 0) + 1;
-  });
-
-  const gradeTotals = {};
-  state.students.forEach(s => {
-    gradeTotals[s.grade] = (gradeTotals[s.grade] || 0) + 1;
-  });
-
-  return { modeCounts, busCounts, gradeTotals, total: state.students.length };
-}
-
-function findStudent(id) {
-  return state.students.find(s => s.id === id) || null;
-}
-
-/* ============================================================
-   العرض: لوحة الإدارة
-   ============================================================ */
-
-function renderDashboard() {
-  const statsEl = $('#stats');
-  const occEl = $('#occupancy');
-  const gradeEl = $('#gradeBars');
-  if (!statsEl || !occEl || !gradeEl) return;
-
-  const { modeCounts, busCounts, gradeTotals } = computeStatistics();
-
-  const stats = [
-    ['إجمالي الطلاب', state.students.length, GRADE_PLAN.length + ' شعبة'],
-    ['نقل حكومي', modeCounts.government, 'من أصل ' + totalBusCapacity() + ' مقعدًا'],
-    ['نقل خاص', modeCounts.private, 'بيانات يقدمها ولي الأمر'],
-    ['مشيًا / غير محدد', modeCounts.walk + modeCounts.pending, 'تحتاج متابعة']
-  ];
-
-  statsEl.innerHTML = stats.map(([label, value, hint]) =>
-    '<article class="stat-card"><small>' + label + '</small><b>' + value +
-    '</b><span>' + hint + '</span></article>'
-  ).join('');
-
-  occEl.innerHTML = BUSES.map(b => {
-    const used = busCounts[b.plate] || 0;
-    const pct = Math.round(used / b.capacity * 100);
-    return '<div class="progress-row"><b>حافلة ' + b.plate + '</b>' +
-      '<div class="progress"><i style="width:' + pct + '%"></i></div>' +
-      '<span>' + used + '/' + b.capacity + '</span></div>';
-  }).join('');
-
-  const gradeEntries = GRADES
-    .filter(g => gradeTotals[g] != null)
-    .map(g => '<div class="grade-bar"><b>' + gradeTotals[g] + '</b><span>طلاب الصف ' + g + '</span></div>');
-  gradeEl.innerHTML = gradeEntries.join('');
-}
-
-/* ============================================================
-   العرض: جدول الطلاب
-   ============================================================ */
-
+/* ---------- تصفية الطلاب ---------- */
 function getFilteredStudents() {
-  const input = $('#studentSearch');
-  const filter = $('#modeFilter');
-  const query = input ? input.value.trim().toUpperCase() : '';
-  const mode = filter ? filter.value : 'all';
-
-  return state.students.filter(s =>
-    (!query || s.id.includes(query) || s.name.toUpperCase().includes(query)) &&
-    (mode === 'all' || s.mode === mode)
-  );
+  const q = state.studentSearch.trim().toLowerCase();
+  return state.students.filter(s => {
+    const matchText = !q ||
+      s.name.toLowerCase().includes(q) ||
+      s.schoolId.toLowerCase().includes(q);
+    const matchMode = state.modeFilter === 'all' || s.mode === state.modeFilter;
+    const matchAssign = state.assignFilter === 'all' ||
+      (state.assignFilter === 'assigned' ? !!s.busId : !s.busId);
+    return matchText && matchMode && matchAssign;
+  });
 }
 
-function renderStudents() {
+/* ---------- العرض: لوحة الإدارة ---------- */
+function renderDashboard() {
+  const total = state.students.length;
+  const gov = state.students.filter(s => s.mode === 'government').length;
+  const pending = state.students.filter(s => s.mode === 'pending').length;
+  const assignedGov = state.students.filter(s => s.mode === 'government' && s.busId).length;
+  const unassignedGov = state.students.filter(s => s.mode === 'government' && !s.busId).length;
+  const usedSeats = state.students.filter(s => s.busId).length;
+
+  const heroBus = $('#heroBusCount');
+  if (heroBus) heroBus.textContent = state.buses.length + (state.buses.length === 1 ? ' حافلة' : ' حافلات');
+
+  const statsEl = $('#stats');
+  if (statsEl) {
+    const cards = [
+      ['إجمالي الطلاب', total, state.buses.length + ' حافلة'],
+      ['نقل حكومي', gov, assignedGov + ' معيّن حاليًا'],
+      ['مقاعد مستخدمة', usedSeats, 'من أصل ' + totalCapacity() + ' مقعد'],
+      ['غير محدد', pending, 'يحتاج متابعة']
+    ];
+    statsEl.innerHTML = cards.map(([label, value, hint]) =>
+      '<article class="stat-card"><small>' + label + '</small><b>' + value +
+      '</b><span>' + hint + '</span></article>').join('');
+  }
+
+  const occEl = $('#occupancy');
+  if (occEl) {
+    occEl.innerHTML = state.buses.length
+      ? state.buses.map(b => {
+          const used = busCount(b.id);
+          const pct = Math.round(used / b.capacity * 100);
+          const over = used > b.capacity;
+          return '<div class="progress-row"><b>حافلة ' + escapeHtml(b.plate) + '</b>' +
+            '<div class="progress"><i class="' + (over ? 'over' : '') + '" style="width:' +
+            Math.min(pct, 100) + '%"></i></div>' +
+            '<span>' + used + '/' + b.capacity + '</span></div>';
+        }).join('')
+      : '<div class="empty-mini">أضف حافلات أولًا من تبويب «الحافلات».</div>';
+  }
+
+  const alertsEl = $('#alerts');
+  if (alertsEl) {
+    const alerts = [];
+    if (pending > 0) alerts.push({ cls: 'warn', b: pending + ' طالب', s: 'لم يحددوا وسيلة النقل بعد' });
+    if (unassignedGov > 0) alerts.push({ cls: 'warn', b: unassignedGov + ' طالب', s: 'بلا حافلة (نقل حكومي)' });
+    const overfull = state.buses.filter(b => busCount(b.id) > b.capacity);
+    if (overfull.length) alerts.push({ cls: 'info', b: overfull.length + ' حافلة', s: 'تجاوزت السعة المسموحة' });
+    if (!alerts.length) alerts.push({ cls: 'safe', b: 'لا شيء', s: 'كل شيء تحت السيطرة' });
+    alertsEl.innerHTML = alerts.map(a =>
+      '<div class="alert ' + a.cls + '"><b>' + a.b + '</b><span>' + a.s + '</span></div>').join('');
+  }
+
+  const gradeEl = $('#gradeBars');
+  if (gradeEl) {
+    const totals = {};
+    state.students.forEach(s => (totals[s.grade] = (totals[s.grade] || 0) + 1));
+    gradeEl.innerHTML = GRADES.map(g =>
+      '<div class="grade-bar"><b>' + (totals[g] || 0) + '</b><span>طلاب الصف ' + g + '</span></div>').join('');
+  }
+}
+
+/* ---------- العرض: قائمة الطلاب ---------- */
+function renderStudentsTable() {
   const body = $('#studentsBody');
-  const loadMore = $('#loadMore');
-  if (!body || !loadMore) return;
+  const empty = $('#studentsEmpty');
+  if (!body || !empty) return;
 
   const list = getFilteredStudents();
-  const rows = list.slice(0, state.visible).map(s => {
-    let assignment;
-    if (s.bus) assignment = 'حافلة ' + s.bus.plate;
-    else if (s.mode === 'private') assignment = 'بانتظار بيانات الحافلة الخاصة';
-    else assignment = '—';
 
-    return '<tr><td><b>' + s.id + '</b></td><td>' + s.name + '</td>' +
-      '<td>' + s.grade + ' / ' + s.section + '</td>' +
+  empty.classList.toggle('hidden', state.students.length > 0);
+  body.innerHTML = list.map(s => {
+    const bus = findBus(s.busId);
+    const hasBusOptions = !!state.buses.length;
+    return '<tr>' +
+      '<td><b>' + escapeHtml(s.schoolId) + '</b></td>' +
+      '<td>' + escapeHtml(s.name) + '</td>' +
+      '<td>' + escapeHtml(s.grade) + ' / ' + (s.section || '') + '</td>' +
+      '<td>' + escapeHtml(s.area || '—') + '</td>' +
       '<td><span class="mode mode-' + s.mode + '">' + MODE_LABELS[s.mode] + '</span></td>' +
-      '<td>' + assignment + '</td></tr>';
-  });
-
-  body.innerHTML = rows.join('') ||
-    '<tr><td colspan="5">لا توجد نتائج مطابقة.</td></tr>';
-  loadMore.hidden = state.visible >= list.length;
+      '<td>' + (bus ? 'حافلة ' + escapeHtml(bus.plate) : '—') + '</td>' +
+      '<td class="row-actions">' +
+        (hasBusOptions && !s.busId ? '<button type="button" class="mini primary" data-assign="' + s.id + '">تعيين</button>' : '') +
+        '<button type="button" class="mini" data-edit-student="' + s.id + '">تعديل</button>' +
+        '<button type="button" class="mini danger" data-delete-student="' + s.id + '">حذف</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('') || '<tr><td colspan="7" class="row-empty">لا توجد نتائج مطابقة للفلترة.</td></tr>';
 }
 
-/* ============================================================
-   العرض: بطاقات الحافلات
-   ============================================================ */
-
-function renderBuses() {
+/* ---------- العرض: الحافلات ---------- */
+function renderBusesGrid() {
   const grid = $('#busGrid');
   if (!grid) return;
 
-  const { busCounts } = computeStatistics();
-
-  grid.innerHTML = BUSES.map(b => {
-    const used = busCounts[b.plate] || 0;
+  grid.innerHTML = state.buses.length ? state.buses.map(b => {
+    const used = busCount(b.id);
     const pct = Math.round(used / b.capacity * 100);
-    return '<article class="bus-card"><div class="bus-card-head">' +
-      '<div><small>' + b.type + '</small><h3>' + b.driver + '</h3></div>' +
-      '<span class="bus-number">' + b.plate + '</span></div>' +
+    const over = used > b.capacity;
+    return '<article class="bus-card">' +
+      '<div class="bus-card-head"><div><small>' + escapeHtml(b.type) + '</small>' +
+      '<h3>' + escapeHtml(b.driverName) + '</h3></div>' +
+      '<span class="bus-number">' + escapeHtml(b.plate) + '</span></div>' +
       '<p>' + used + ' طالبًا من أصل ' + b.capacity + ' مقعدًا</p>' +
-      '<div class="progress"><i style="width:' + pct + '%"></i></div>' +
-      '<small>' + pct + '% إشغال تجريبي</small></article>';
-  }).join('');
+      '<div class="progress"><i class="' + (over ? 'over' : '') + '" style="width:' + Math.min(pct, 100) + '%"></i></div>' +
+      '<small class="' + (over ? 'over-text' : '') + '">' + pct + '% إشغال</small>' +
+      '<div class="card-actions">' +
+        '<button type="button" class="mini" data-edit-bus="' + b.id + '">تعديل</button>' +
+        '<button type="button" class="mini danger" data-delete-bus="' + b.id + '">حذف</button>' +
+      '</div>' +
+    '</article>';
+  }).join('') : '<div class="empty-state"><b>لا توجد حافلات</b><span>ابدأ بإضافة حافلة وسائقها من الزر أعلاه.</span></div>';
 }
 
-/* ============================================================
-   العرض: التنقل بين الأقسام
-   ============================================================ */
+/* ---------- العرض: التعيينات ---------- */
+function renderAssignments() {
+  const awaiting = state.students.filter(s => !s.busId && s.mode !== 'private');
+  const countEl = $('#awaitingCount');
+  const awaitList = $('#awaitingList');
+  const awaitEmpty = $('#awaitingEmpty');
+  const table = $('#assignTable');
+  if (!countEl || !awaitList || !awaitEmpty || !table) return;
+
+  const activeBuses = state.buses;
+
+  countEl.textContent = awaiting.length;
+  awaitEmpty.classList.toggle('hidden', awaiting.length > 0);
+
+  awaitList.innerHTML = awaiting.length
+    ? awaiting.map(s => {
+        const options = activeBuses.map(b => {
+          const used = busCount(b.id);
+          const free = b.capacity - used;
+          return '<option value="' + b.id + '">' + escapeHtml(b.plate) + ' (' + free + ' متاح من ' + b.capacity + ')</option>';
+        }).join('');
+        return '<div class="await-row">' +
+          '<div><b>' + escapeHtml(s.name) + '</b><small>' + escapeHtml(s.schoolId) + ' • ' +
+            escapeHtml(s.grade) + '/' + (s.section || '') + (s.area ? ' • ' + escapeHtml(s.area) : '') + '</small></div>' +
+          (activeBuses.length
+            ? '<span class="await-controls"><select data-assign-select="' + s.id + '">' + options + '</select>' +
+              '<button type="button" class="mini primary" data-assign-to="' + s.id + '">عيّن</button></span>'
+            : '<span class="await-controls note-inline">أضف حافلات أولًا</span>') +
+        '</div>';
+      }).join('')
+    : '';
+
+  const assigned = state.students
+    .filter(s => s.busId)
+    .sort((a, b) => (findBus(a.busId).plate > findBus(b.busId).plate ? 1 : -1));
+
+  table.innerHTML = assigned.map(s => {
+    const bus = findBus(s.busId);
+    const used = busCount(bus.id);
+    return '<tr>' +
+      '<td><b>' + escapeHtml(s.name) + '</b><br><small>' + escapeHtml(s.schoolId) + '</small></td>' +
+      '<td>حافلة ' + escapeHtml(bus.plate) + '<br><small>' + escapeHtml(bus.driverName) + '</small></td>' +
+      '<td>' + used + '/' + bus.capacity + '</td>' +
+      '<td class="row-actions"><button type="button" class="mini danger" data-unassign="' + s.id + '">إلغاء التعيين</button></td>' +
+    '</tr>';
+  }).join('') || '<tr><td colspan="4" class="row-empty">لا توجد تعيينات بعد.</td></tr>';
+}
+
+/* ---------- العرض العام ---------- */
+function renderAll() {
+  renderDashboard();
+  renderStudentsTable();
+  renderBusesGrid();
+  renderAssignments();
+}
+
+/* ---------- إدارة الطلاب ---------- */
+function fillAreasDatalist() {
+  const dl = $('#areasList');
+  if (dl) dl.innerHTML = enumAreas().map(a => '<option value="' + escapeHtml(a) + '">').join('');
+}
+
+function fillBusSelect(selectedBusId) {
+  const sel = $('#sBus');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— بلا حافلة —</option>' +
+    state.buses.map(b => '<option value="' + b.id + '"' + (b.id === selectedBusId ? ' selected' : '') + '>' +
+      escapeHtml(b.plate) + ' (' + escapeHtml(b.driverName) + ')</option>').join('');
+}
+
+function openStudentDialog(student) {
+  const dialog = $('#studentDialog');
+  if (!dialog) return;
+  state.editStudentId = student ? student.id : null;
+
+  $('#studentDialogTitle').textContent = student ? 'تعديل طالب' : 'إضافة طالب';
+  $('#sSchoolId').value = student ? student.schoolId : '';
+  $('#sName').value = student ? student.name : '';
+  $('#sGrade').value = student ? student.grade : 'الخامس';
+  $('#sSection').value = student ? (student.section || 1) : 1;
+  $('#sArea').value = student ? (student.area || '') : '';
+  $('#sMode').value = student ? student.mode : 'pending';
+  fillAreasDatalist();
+  fillBusSelect(student ? student.busId : '');
+  dialog.showModal();
+}
+
+function saveStudentFromForm() {
+  const schoolId = $('#sSchoolId').value.trim();
+  const name = $('#sName').value.trim();
+  const grade = $('#sGrade').value;
+  const section = parseInt($('#sSection').value, 10) || 1;
+  const area = $('#sArea').value.trim();
+  const mode = $('#sMode').value;
+  const busId = $('#sBus').value || null;
+
+  if (!schoolId || !name) { toast('أدخل الرقم المدرسي والاسم'); return; }
+
+  const duplicate = state.students.find(s =>
+    s.schoolId.toLowerCase() === schoolId.toLowerCase() &&
+    s.id !== state.editStudentId);
+  if (duplicate) { toast('رقم مدرسي مكرر: ' + schoolId); return; }
+
+  const bus = findBus(busId);
+  if (bus && busCount(bus.id) >= bus.capacity && !state.students.find(s => s.id === state.editStudentId && s.busId === busId)) {
+    toast('سعة الحافلة ممتلئة: ' + bus.plate);
+    return;
+  }
+
+  if (state.editStudentId) {
+    const student = findStudent(state.editStudentId);
+    if (student) {
+      student.schoolId = schoolId;
+      student.name = name;
+      student.grade = grade;
+      student.section = section;
+      student.area = area;
+      student.mode = mode;
+      student.busId = busId;
+    }
+  } else {
+    state.students.push({
+      id: newId(), schoolId, name, grade, section, area, mode, busId
+    });
+  }
+
+  state.students.sort((a, b) => (a.schoolId > b.schoolId ? 1 : -1));
+  persist();
+  renderAll();
+  $('#studentDialog').close();
+  toast(state.editStudentId ? 'تم حفظ تعديلات الطالب' : 'تمت إضافة الطالب');
+}
+
+function deleteStudent(id) {
+  state.students = state.students.filter(s => s.id !== id);
+  persist();
+  renderAll();
+  toast('تم حذف الطالب');
+}
+
+/* ---------- إدارة الحافلات ---------- */
+function openBusDialog(bus) {
+  const dialog = $('#busDialog');
+  if (!dialog) return;
+  state.editBusId = bus ? bus.id : null;
+
+  $('#busDialogTitle').textContent = bus ? 'تعديل حافلة' : 'إضافة حافلة';
+  $('#bPlate').value = bus ? bus.plate : '';
+  $('#bDriver').value = bus ? bus.driverName : '';
+  $('#bCapacity').value = bus ? bus.capacity : 1;
+  $('#bType').value = bus ? bus.type : 'كبيرة';
+  dialog.showModal();
+}
+
+function saveBusFromForm() {
+  const plate = $('#bPlate').value.trim();
+  const driverName = $('#bDriver').value.trim();
+  const capacity = parseInt($('#bCapacity').value, 10) || 1;
+  const type = $('#bType').value;
+
+  if (!plate || !driverName) { toast('أدخل رقم اللوحة واسم السائق'); return; }
+
+  const duplicate = state.buses.find(b =>
+    b.plate.toLowerCase() === plate.toLowerCase() && b.id !== state.editBusId);
+  if (duplicate) { toast('لوحة مكررة: ' + plate); return; }
+
+  if (state.editBusId) {
+    const bus = findBus(state.editBusId);
+    if (bus) {
+      const assignedCount = busCount(bus.id);
+      if (capacity < assignedCount) {
+        toast('السعة أدنى من عدد الطلاب المعيّنين حاليًا (' + assignedCount + ')');
+        return;
+      }
+      bus.plate = plate;
+      bus.driverName = driverName;
+      bus.capacity = capacity;
+      bus.type = type;
+    }
+  } else {
+    state.buses.push({ id: newId(), plate, driverName, capacity, type });
+  }
+
+  state.buses.sort((a, b) => (a.plate > b.plate ? 1 : -1));
+  persist();
+  renderAll();
+  $('#busDialog').close();
+  toast(state.editBusId ? 'تم حفظ تعديلات الحافلة' : 'تمت إضافة الحافلة');
+}
+
+function deleteBus(id) {
+  const count = busCount(id);
+  if (count > 0) {
+    state.students.forEach(s => { if (s.busId === id) s.busId = null; });
+  }
+  state.buses = state.buses.filter(b => b.id !== id);
+  persist();
+  renderAll();
+  toast(count > 0 ? 'حُذفت الحافلة وأُلغي تعيين ' + count + ' طالب' : 'تم حذف الحافلة');
+}
+
+/* ---------- التعيين ---------- */
+function assignStudentToBus(studentId, busId) {
+  const student = findStudent(studentId);
+  const bus = findBus(busId);
+  if (!student || !bus) return;
+  if (busCount(bus.id) >= bus.capacity) { toast('سعة الحافلة ممتلئة: ' + bus.plate); return; }
+  student.busId = bus.id;
+  if (student.mode === 'pending') student.mode = 'government';
+  persist();
+  renderAll();
+  toast('تم تعيين الطالب على حافلة ' + bus.plate);
+}
+
+function unassignStudent(studentId) {
+  const student = findStudent(studentId);
+  if (!student) return;
+  const bus = findBus(student.busId);
+  student.busId = null;
+  persist();
+  renderAll();
+  toast(bus ? 'أُلغي تعيين الطالب من حافلة ' + bus.plate : 'أُلغي التعيين');
+}
+
+function selectBusForStudent(studentId, selectEl) {
+  const student = findStudent(studentId);
+  if (!student || !selectEl) return;
+  const bus = findBus(selectEl.value);
+  if (!bus) return;
+  const free = bus.capacity - busCount(bus.id);
+  if (free <= 0) { toast('لا توجد مقاعد متاحة في حافلة ' + bus.plate); return; }
+  assignStudentToBus(studentId, bus.id);
+}
+
+function pickBestBus() {
+  let best = null;
+  state.buses.forEach(b => {
+    const free = b.capacity - busCount(b.id);
+    if (free > 0 && (!best || free > best.capacity - busCount(best.id))) best = b;
+  });
+  return best;
+}
+
+/* ---------- النسخ الاحتياطي ---------- */
+function exportBackup() {
+  const payload = {
+    app: 'hawafilati',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    students: state.students,
+    buses: state.buses
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  a.href = url;
+  a.download = 'hawafilati-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('تم تنزيل النسخة الاحتياطية');
+}
+
+function validateBackup(data) {
+  return data &&
+    typeof data === 'object' &&
+    Array.isArray(data.students) &&
+    Array.isArray(data.buses);
+}
+
+function importBackup(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!validateBackup(data)) { toast('ملف غير صالح'); return; }
+
+      const students = data.students.map(s => ({
+        id: s.id || newId(),
+        schoolId: String(s.schoolId || ''),
+        name: String(s.name || ''),
+        grade: String(s.grade || ''),
+        section: s.section || 1,
+        area: s.area || '',
+        mode: MODES.includes(s.mode) ? s.mode : 'pending',
+        busId: s.busId || null
+      }));
+      const buses = data.buses.map(b => ({
+        id: b.id || newId(),
+        plate: String(b.plate || ''),
+        driverName: String(b.driverName || ''),
+        capacity: b.capacity || 1,
+        type: String(b.type || '')
+      }));
+
+      const busIds = new Set(buses.map(b => b.id));
+      students.forEach(s => { if (s.busId && !busIds.has(s.busId)) s.busId = null; });
+
+      state.students = students;
+      state.buses = buses;
+      persist();
+      renderAll();
+      toast('تم الاستيراد: ' + students.length + ' طالب و' + buses.length + ' حافلة');
+    } catch (e) {
+      console.error(e);
+      toast('تعذر قراءة الملف');
+    }
+    $('#importFile').value = '';
+  };
+  reader.readAsText(file);
+}
+
+function resetAllData() {
+  state.students = [];
+  state.buses = [];
+  persist();
+  renderAll();
+  $('#resetDialog').close();
+  toast('حُذفت كل البيانات');
+}
+
+/* ---------- الأحداث ---------- */
+function bindEvents() {
+  $all('.tab').forEach(tab => tab.addEventListener('click', () => setView(tab.dataset.view)));
+
+  $all('[data-action="export"]').forEach(btn => btn.addEventListener('click', exportBackup));
+
+  const importBtn = $('#importBtn');
+  const importFile = $('#importFile');
+  if (importBtn && importFile) {
+    importBtn.addEventListener('click', () => {
+      if (!state.students.length && !state.buses.length) importFile.click();
+      else if (confirm('سيستبدل الاستيراد البيانات الحالية. متابعة؟')) importFile.click();
+    });
+    importFile.addEventListener('change', () => {
+      if (importFile.files && importFile.files[0]) importBackup(importFile.files[0]);
+    });
+  }
+
+  const resetBtn = $('#resetBtn');
+  const resetDialog = $('#resetDialog');
+  const confirmReset = $('#confirmReset');
+  if (resetBtn && resetDialog) resetBtn.addEventListener('click', () => resetDialog.showModal());
+  if (confirmReset) confirmReset.addEventListener('click', resetAllData);
+
+  const search = $('#studentSearch');
+  if (search) search.addEventListener('input', () => { state.studentSearch = search.value; renderStudentsTable(); });
+
+  const modeFilter = $('#modeFilter');
+  if (modeFilter) modeFilter.addEventListener('change', () => { state.modeFilter = modeFilter.value; renderStudentsTable(); });
+
+  const assignFilter = $('#assignFilter');
+  if (assignFilter) assignFilter.addEventListener('change', () => { state.assignFilter = assignFilter.value; renderStudentsTable(); });
+
+  const addStudentBtn = $('#addStudentBtn');
+  if (addStudentBtn) addStudentBtn.addEventListener('click', () => openStudentDialog(null));
+
+  const addBusBtn = $('#addBusBtn');
+  if (addBusBtn) addBusBtn.addEventListener('click', () => openBusDialog(null));
+
+  const studentForm = $('#studentForm');
+  if (studentForm) studentForm.addEventListener('submit', e => { e.preventDefault(); saveStudentFromForm(); });
+
+  const busForm = $('#busForm');
+  if (busForm) busForm.addEventListener('submit', e => { e.preventDefault(); saveBusFromForm(); });
+
+  $all('[data-dialog-cancel]').forEach(btn => btn.addEventListener('click', () => {
+    const dialog = btn.closest('dialog');
+    if (dialog) dialog.close();
+  }));
+
+  document.addEventListener('click', e => {
+    const assignBtn = e.target.closest('[data-assign]');
+    if (assignBtn) {
+      const best = pickBestBus();
+      if (best) assignStudentToBus(assignBtn.dataset.assign, best.id);
+      else toast('لا توجد مقاعد متاحة في أي حافلة');
+      return;
+    }
+
+    const editStudent = e.target.closest('[data-edit-student]');
+    if (editStudent) { openStudentDialog(findStudent(editStudent.dataset.editStudent)); return; }
+
+    const delStudent = e.target.closest('[data-delete-student]');
+    if (delStudent) {
+      const student = findStudent(delStudent.dataset.deleteStudent);
+      if (student && confirm('حذف الطالب: ' + student.name + '؟')) deleteStudent(student.id);
+      return;
+    }
+
+    const editBus = e.target.closest('[data-edit-bus]');
+    if (editBus) { openBusDialog(findBus(editBus.dataset.editBus)); return; }
+
+    const delBus = e.target.closest('[data-delete-bus]');
+    if (delBus) {
+      const bus = findBus(delBus.dataset.deleteBus);
+      if (bus && confirm('حذف الحافلة ' + bus.plate + '؟ سيُلغي تعيين طلابها.')) deleteBus(bus.id);
+      return;
+    }
+
+    const assignTo = e.target.closest('[data-assign-to]');
+    if (assignTo) {
+      const studentId = assignTo.dataset.assignTo;
+      const select = $('[data-assign-select="' + studentId + '"]');
+      if (select && select.value) selectBusForStudent(studentId, select);
+      return;
+    }
+
+    const unassign = e.target.closest('[data-unassign]');
+    if (unassign) {
+      const student = findStudent(unassign.dataset.unassign);
+      if (student && confirm('إلغاء تعيين: ' + student.name + '؟')) unassignStudent(student.id);
+    }
+  });
+}
 
 function setView(id) {
   $all('.view').forEach(v => v.classList.remove('active'));
   $all('.tab').forEach(t => t.classList.remove('active'));
-
   const view = $('#' + id);
   const tab = $('.tab[data-view="' + id + '"]');
   if (view) view.classList.add('active');
   if (tab) tab.classList.add('active');
+  if (id === 'students') renderStudentsTable();
+  if (id === 'assignments') renderAssignments();
 }
 
-/* ============================================================
-   بوابة ولي الأمر
-   ============================================================ */
-
-function renderChildCard(student) {
-  const card = $('#childCard');
-  if (!card) return;
-  card.innerHTML = '<div class="child-card"><div><b>' + student.name + '</b><br>' +
-    '<small>' + student.id + ' • الصف ' + student.grade + '/' + student.section + '</small></div>' +
-    '<span class="mode mode-' + student.mode + '">' + MODE_LABELS[student.mode] + '</span></div>';
-}
-
-function updateAssignmentPreview(area) {
-  const preview = $('#assignmentPreview');
-  if (!preview) return;
-
-  const bus = BUSES[AREAS.indexOf(area) % BUSES.length];
-  preview.innerHTML = '<b>التعيين المقترح</b><p>سيعين النظام الحافلة <strong>' +
-    bus.plate + '</strong> بعد اعتماد مشرف النقل وتوفر السعة.</p>';
-}
-
-function handleParentLogin(event) {
-  if (event) event.preventDefault();
-
-  const idInput = $('#schoolId');
-  const message = $('#loginMessage');
-  const workspace = $('#parentWorkspace');
-  if (!idInput || !message || !workspace) return;
-
-  const id = idInput.value.trim().toUpperCase();
-  const student = findStudent(id);
-
-  if (!student) {
-    message.textContent = 'الرقم غير موجود في البيانات التجريبية.';
-    return;
-  }
-
-  message.textContent = '';
-  workspace.classList.remove('hidden');
-
-  const stored = readStoredChoice(id);
-  const area = stored && stored.area ? stored.area : student.area;
-
-  renderChildCard(student);
-  const areaSelect = $('#areaSelect');
-  if (areaSelect) areaSelect.value = area;
-  updateAssignmentPreview(area);
-}
-
-function readStoredChoice(id) {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    return data && data[id] ? data[id] : null;
-  } catch (e) {
-    console.warn('تعذر قراءة بيانات التجربة المحفوظة:', e);
-    return null;
-  }
-}
-
-function saveStoredChoice(id, choice) {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const data = raw ? JSON.parse(raw) : {};
-    data[id] = choice;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch (e) {
-    console.warn('تعذر حفظ بيانات التجربة:', e);
-  }
-}
-
-function handleSaveChoice() {
-  const idInput = $('#schoolId');
-  const areaSelect = $('#areaSelect');
-  if (!idInput || !areaSelect) return;
-
-  const id = idInput.value.trim().toUpperCase();
-  const student = findStudent(id);
-  if (!student) return;
-
-  saveStoredChoice(id, {
-    area: areaSelect.value,
-    stop: $('#stopSelect') ? $('#stopSelect').value : '',
-    savedAt: new Date().toISOString()
-  });
-
-  toast('تم حفظ الطلب التجريبي وإرساله للمشرف');
-}
-
-function handleAddStop() {
-  toast('سُجل اقتراح نقطة وبانتظار اعتماد المشرف');
-}
-
-/* ============================================================
-   واجهة السائق: مشاركة الموقع
-   ============================================================ */
-
-function handleToggleTracking() {
-  const card = $('.tracking');
-  const status = $('#tripStatus');
-  const btn = $('#trackBtn');
-  const share = $('#shareBtn');
-  const locationText = $('#locationText');
-  if (!card || !status || !btn || !share || !locationText) return;
-
-  state.tracking = !state.tracking;
-
-  if (state.tracking) {
-    card.classList.add('active');
-    status.textContent = 'الموقع مباشر';
-    status.className = 'status ok';
-    btn.textContent = 'إيقاف مشاركة الموقع';
-    share.disabled = false;
-    locationText.textContent = 'جارٍ طلب الموقع…';
-
-    if (navigator.geolocation) {
-      state.watchId = navigator.geolocation.watchPosition(
-        p => {
-          locationText.textContent = 'آخر تحديث: ' + p.coords.latitude.toFixed(5) +
-            '، ' + p.coords.longitude.toFixed(5);
-        },
-        () => { locationText.textContent = 'تعذر الوصول للموقع — تحقق من الإذن'; }
-      );
-    } else {
-      locationText.textContent = 'الموقع غير مدعوم في هذا المتصفح';
-    }
-  } else {
-    card.classList.remove('active');
-    status.textContent = 'انتهت المشاركة';
-    status.className = 'status idle';
-    btn.textContent = 'بدء مشاركة الموقع';
-    share.disabled = true;
-    locationText.textContent = 'الموقع غير مشارك';
-    if (state.watchId !== null && navigator.geolocation) {
-      navigator.geolocation.clearWatch(state.watchId);
-      state.watchId = null;
-    }
-  }
-}
-
-function handleShareTrip() {
-  const text = encodeURIComponent('تابع رحلة الحافلة التجريبية عبر رابط حافلاتي المؤقت');
-  window.open('https://wa.me/?text=' + text, '_blank');
-}
-
-/* ============================================================
-   إعادة ضبط التجربة
-   ============================================================ */
-
-function openDialog() {
-  const dialog = $('#resetDialog');
-  if (dialog) dialog.showModal();
-}
-
-function handleConfirmReset() {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch (e) {
-    console.warn('تعذر مسح البيانات المحفوظة:', e);
-  }
-  state.students = buildStudents();
-  state.visible = VISIBLE_STEP;
-  renderAll();
-  toast('تمت إعادة البيانات التجريبية');
-}
-
-/* ============================================================
-   تهيئة التطبيق
-   ============================================================ */
-
-function renderAll() {
-  renderDashboard();
-  renderStudents();
-  renderBuses();
-}
-
-function initAreaSelect() {
-  const select = $('#areaSelect');
-  if (!select) return;
-  select.innerHTML = AREAS.map(a => '<option>' + a + '</option>').join('');
-}
-
-function bindEvents() {
-  $all('.tab').forEach(tab => tab.addEventListener('click', () => setView(tab.dataset.view)));
-
-  const search = $('#studentSearch');
-  const filter = $('#modeFilter');
-  const loadMore = $('#loadMore');
-  if (search) search.addEventListener('input', () => { state.visible = VISIBLE_STEP; renderStudents(); });
-  if (filter) filter.addEventListener('change', () => { state.visible = VISIBLE_STEP; renderStudents(); });
-  if (loadMore) loadMore.addEventListener('click', () => { state.visible += VISIBLE_STEP; renderStudents(); });
-
-  const resetBtn = $('#resetBtn');
-  const confirmReset = $('#confirmReset');
-  if (resetBtn) resetBtn.addEventListener('click', openDialog);
-  if (confirmReset) confirmReset.addEventListener('click', handleConfirmReset);
-
-  const parentLogin = $('#parentLogin');
-  const areaSelect = $('#areaSelect');
-  const saveChoice = $('#saveChoice');
-  if (parentLogin) parentLogin.addEventListener('submit', handleParentLogin);
-  if (areaSelect) areaSelect.addEventListener('change', () => updateAssignmentPreview(areaSelect.value));
-  if (saveChoice) saveChoice.addEventListener('click', handleSaveChoice);
-
-  const addStop = $('#addStop');
-  const trackBtn = $('#trackBtn');
-  const shareBtn = $('#shareBtn');
-  if (addStop) addStop.addEventListener('click', handleAddStop);
-  if (trackBtn) trackBtn.addEventListener('click', handleToggleTracking);
-  if (shareBtn) shareBtn.addEventListener('click', handleShareTrip);
-}
-
+/* ---------- الإقلاع ---------- */
 function init() {
-  state.students = buildStudents();
-  initAreaSelect();
+  const data = loadData();
+  state.students = data.students;
+  state.buses = data.buses;
+  state.students.sort((a, b) => (a.schoolId > b.schoolId ? 1 : -1));
+  state.buses.sort((a, b) => (a.plate > b.plate ? 1 : -1));
   bindEvents();
   renderAll();
 }
