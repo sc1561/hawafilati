@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b3b60">
+  <title>حافلاتي | إدارة النقل المدرسي</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-icon">🚌</span><div><strong>حافلاتي</strong><small>مدرسة أبو القاسم الزهراوي (5–9)</small></div></div>
+    <div class="top-actions"><span class="demo-pill">بيانات تجريبية</span><button id="resetBtn" class="ghost">↻ إعادة ضبط التجربة</button></div>
+  </header>
+
+  <nav class="tabs" aria-label="الأقسام الرئيسية">
+    <button class="tab active" data-view="dashboard">لوحة الإدارة</button>
+    <button class="tab" data-view="students">الطلاب</button>
+    <button class="tab" data-view="buses">الحافلات</button>
+    <button class="tab" data-view="parent">بوابة ولي الأمر</button>
+    <button class="tab" data-view="driver">واجهة السائق</button>
+  </nav>
+
+  <main class="container">
+    <section id="dashboard" class="view active">
+      <div class="hero">
+        <div><span class="eyebrow">مركز تشغيل النقل</span><h1>صورة واضحة لكل رحلة، حافلة وطالب</h1><p>تصور أولي لنظام النقل الحكومي والخاص والمشي، مبني ببيانات وهمية قابلة لإعادة الضبط.</p></div>
+        <div class="hero-bus">🚌<span>10 حافلات حكومية</span></div>
+      </div>
+      <div id="stats" class="stats"></div>
+      <div class="grid two">
+        <article class="panel"><div class="panel-head"><div><small>حالة الأسطول</small><h2>الإشغال الحكومي</h2></div><span class="status ok">مستقر</span></div><div id="occupancy"></div></article>
+        <article class="panel"><div class="panel-head"><div><small>تحتاج متابعة</small><h2>التنبيهات التشغيلية</h2></div></div><div class="alerts"><div class="alert warn"><b>64 طالبًا</b><span>لم يحددوا وسيلة النقل بعد</span></div><div class="alert info"><b>13 منطقة</b><span>بانتظار إضافة نقاط التجمع الفعلية</span></div><div class="alert safe"><b>0 تجاوز</b><span>جميع التوزيعات ضمن السعة</span></div></div></article>
+      </div>
+      <article class="panel"><div class="panel-head"><div><small>ملخص حسب الصف</small><h2>توزيع الطلاب</h2></div></div><div id="gradeBars" class="grade-bars"></div></article>
+    </section>
+
+    <section id="students" class="view">
+      <div class="page-head"><div><span class="eyebrow">824 سجلًا تجريبيًا</span><h1>إدارة الطلاب والنقل</h1></div><div class="filters"><input id="studentSearch" placeholder="ابحث بالرقم المدرسي"><select id="modeFilter"><option value="all">كل الحالات</option><option value="government">نقل حكومي</option><option value="private">نقل خاص</option><option value="walk">مشيًا</option><option value="pending">غير محدد</option></select></div></div>
+      <div class="table-wrap"><table><thead><tr><th>الرقم المدرسي</th><th>الطالب</th><th>الصف/الشعبة</th><th>وسيلة النقل</th><th>التعيين</th></tr></thead><tbody id="studentsBody"></tbody></table></div><button id="loadMore" class="primary wide">عرض المزيد</button>
+    </section>
+
+    <section id="buses" class="view">
+      <div class="page-head"><div><span class="eyebrow">الأسطول الحكومي</span><h1>الحافلات والسائقون</h1></div></div><div id="busGrid" class="bus-grid"></div>
+      <article class="panel note"><b>ملاحظة تشغيلية</b><p>تصنيف المناطق التي لا تدخلها الحافلات الكبيرة مؤجل حتى يحدده مشرف النقل. نقاط السائق الجديدة لا تظهر للأهالي إلا بعد الاعتماد.</p></article>
+    </section>
+
+    <section id="parent" class="view">
+      <div class="portal-shell"><div class="portal-intro"><span class="eyebrow">بوابة ولي الأمر</span><h1>اختر نقطة التجمع، وسنعيّن الحافلة المناسبة</h1><p>استخدم رقمًا من STU0001 إلى STU0824 لتجربة الدخول. البيانات وهمية بالكامل.</p></div>
+      <form id="parentLogin" class="login-card"><label>الرقم المدرسي للطالب</label><input id="schoolId" required placeholder="مثال: STU0001" autocomplete="off"><button class="primary">دخول آمن</button><p id="loginMessage" class="message"></p></form>
+      <div id="parentWorkspace" class="parent-workspace hidden"><div id="childCard"></div><div class="choice-grid"><label>المنطقة السكنية<select id="areaSelect"></select></label><label>نقطة التجمع<select id="stopSelect"><option>النقطة الرئيسية — تجريبية</option><option>بالقرب من المسجد — تجريبية</option></select></label></div><div id="assignmentPreview" class="assignment-preview"></div><button id="saveChoice" class="primary wide">حفظ الطلب التجريبي</button></div></div>
+    </section>
+
+    <section id="driver" class="view">
+      <div class="driver-shell"><div class="driver-card"><div class="driver-avatar">س</div><div><span class="eyebrow">واجهة السائق</span><h1>رحلة الحافلة 6521</h1><p>عبدالله محمد ناصر الكحالي • المسار الصباحي</p></div><span id="tripStatus" class="status idle">لم تبدأ</span></div>
+      <div class="grid two"><article class="panel"><h2>نقاط التوقف</h2><ol class="stops"><li><b>حلة القلعة</b><span>06:25 ص</span></li><li><b>حلة البوسعيد</b><span>06:35 ص</span></li><li><b>المدرسة</b><span>06:55 ص</span></li></ol><button id="addStop" class="ghost wide">＋ اقتراح نقطة توقف</button></article>
+      <article class="panel tracking"><div class="location-dot"></div><h2>مشاركة الموقع المباشر</h2><p>محاكاة للواجهة فقط. النسخة الفعلية للسائق ستدعم الموقع أثناء قفل الشاشة.</p><div id="locationText" class="location-text">الموقع غير مشارك</div><button id="trackBtn" class="primary wide">بدء مشاركة الموقع</button><button id="shareBtn" class="whatsapp wide" disabled>مشاركة الرابط عبر واتساب</button></article></div></div>
+    </section>
+  </main>
+
+  <dialog id="resetDialog"><form method="dialog"><h2>إعادة ضبط البيانات التجريبية</h2><p>سيتم حذف اختيارات هذه التجربة وإعادة إنشاء التوزيع الوهمي. لا يؤثر ذلك في أي بيانات مدرسية حقيقية.</p><div class="dialog-actions"><button value="cancel" class="ghost">إلغاء</button><button id="confirmReset" value="default" class="danger">إعادة الضبط</button></div></form></dialog>
+  <div id="toast" class="toast"></div>
+  <script src="assets/app.js"></script>
+</body>
+</html>
