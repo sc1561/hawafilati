@@ -87,6 +87,7 @@
             <tr><th>الرقم المدرسي</th><th>الطالب</th><th>الصف/الشعبة</th><th>المنطقة</th><th>وسيلة النقل</th><th>الحافلة</th><th>إجراءات</th></tr>
           </thead>
           <tbody id="studentsBody"></tbody>
+          <tfoot id="studentsFoot"></tfoot>
         </table>
         <div id="studentsEmpty" class="empty-state hidden">
           <b>لا يوجد طلاب بعد</b>
@@ -108,6 +109,7 @@
     <section id="assignments" class="view">
       <div class="page-head">
         <div><span class="eyebrow">توزيع الطلاب</span><h1>تعيين الطلاب على الحافلات</h1></div>
+        <button type="button" class="primary" id="autoAssignBtn">⚡ توزيع تلقائي</button>
       </div>
 
       <article class="panel">
@@ -146,6 +148,13 @@
           <p>استبدل البيانات الحالية بملف نسخة سابق. سيُطلب منك التأكيد.</p>
           <button type="button" class="primary wide" id="importBtn">⬆ استيراد ملف</button>
           <input type="file" id="importFile" accept=".json,application/json" class="hidden-input">
+        </article>
+
+        <article class="panel">
+          <h2>إضافة طلاب بالجملة</h2>
+          <p>الصق الصفوف بالصيغة: <code>الرقم، الاسم، الصف، الشعبة، المنطقة، الوسيلة</code> — أو بدون الصف والشعبة.</p>
+          <textarea id="csvInput" rows="6" placeholder="S100, أحمد محمد, الخامس, 1, وسط المدينة, government&#10;S101, فاطمة علي, السادس, 2, الشمال, private"></textarea>
+          <button type="button" class="primary wide" id="csvImportBtn">⬆ استيراد الصفوف</button>
         </article>
 
         <article class="panel danger-zone">

@@ -10,6 +10,8 @@ const STORAGE_KEY = 'hawafilati-data-v1';
 const GRADES = ['الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع'];
 const MODE_LABELS = { government: 'نقل حكومي', private: 'نقل خاص', walk: 'مشيًا', pending: 'غير محدد' };
 const MODES = ['government', 'private', 'walk', 'pending'];
+const PAGE_SIZE = 50;
+const SEARCH_DEBOUNCE = 150;
 
 /* ---------- الحالة ---------- */
 const state = {
@@ -19,7 +21,8 @@ const state = {
   modeFilter: 'all',
   assignFilter: 'all',
   editStudentId: null,
-  editBusId: null
+  editBusId: null,
+  visibleStudents: PAGE_SIZE
 };
 
 /* ---------- أدوات مساعدة ---------- */
@@ -166,28 +169,45 @@ function renderDashboard() {
 function renderStudentsTable() {
   const body = $('#studentsBody');
   const empty = $('#studentsEmpty');
+  const foot = $('#studentsFoot');
   if (!body || !empty) return;
 
   const list = getFilteredStudents();
+  const pageCount = state.visibleStudents;
+  const visible = list.slice(0, pageCount);
+  const hasStudents = state.students.length > 0;
 
-  empty.classList.toggle('hidden', state.students.length > 0);
-  body.innerHTML = list.map(s => {
-    const bus = findBus(s.busId);
-    const hasBusOptions = !!state.buses.length;
-    return '<tr>' +
-      '<td><b>' + escapeHtml(s.schoolId) + '</b></td>' +
-      '<td>' + escapeHtml(s.name) + '</td>' +
-      '<td>' + escapeHtml(s.grade) + ' / ' + (s.section || '') + '</td>' +
-      '<td>' + escapeHtml(s.area || '—') + '</td>' +
-      '<td><span class="mode mode-' + s.mode + '">' + MODE_LABELS[s.mode] + '</span></td>' +
-      '<td>' + (bus ? 'حافلة ' + escapeHtml(bus.plate) : '—') + '</td>' +
-      '<td class="row-actions">' +
-        (hasBusOptions && !s.busId ? '<button type="button" class="mini primary" data-assign="' + s.id + '">تعيين</button>' : '') +
-        '<button type="button" class="mini" data-edit-student="' + s.id + '">تعديل</button>' +
-        '<button type="button" class="mini danger" data-delete-student="' + s.id + '">حذف</button>' +
-      '</td>' +
-    '</tr>';
-  }).join('') || '<tr><td colspan="7" class="row-empty">لا توجد نتائج مطابقة للفلترة.</td></tr>';
+  empty.classList.toggle('hidden', hasStudents);
+
+  body.innerHTML = hasStudents
+    ? (visible.length
+        ? visible.map(s => {
+            const bus = findBus(s.busId);
+            const hasBusOptions = !!state.buses.length;
+            return '<tr>' +
+              '<td><b>' + escapeHtml(s.schoolId) + '</b></td>' +
+              '<td>' + escapeHtml(s.name) + '</td>' +
+              '<td>' + escapeHtml(s.grade) + ' / ' + (s.section || '') + '</td>' +
+              '<td>' + escapeHtml(s.area || '—') + '</td>' +
+              '<td><span class="mode mode-' + s.mode + '">' + MODE_LABELS[s.mode] + '</span></td>' +
+              '<td>' + (bus ? 'حافلة ' + escapeHtml(bus.plate) : '—') + '</td>' +
+              '<td class="row-actions">' +
+                (hasBusOptions && !s.busId ? '<button type="button" class="mini primary" data-assign="' + s.id + '">تعيين</button>' : '') +
+                '<button type="button" class="mini" data-edit-student="' + s.id + '">تعديل</button>' +
+                '<button type="button" class="mini danger" data-delete-student="' + s.id + '">حذف</button>' +
+              '</td>' +
+            '</tr>';
+          }).join('')
+        : '<tr><td colspan="7" class="row-empty">لا توجد نتائج مطابقة للفلترة.</td></tr>')
+    : '';
+
+  if (foot) {
+    const loaded = visible.length;
+    const total = list.length;
+    foot.innerHTML = total > pageCount
+      ? '<button type="button" class="ghost wide" data-load-more>عرض المزيد (' + loaded + ' من ' + total + ')</button>'
+      : (hasStudents ? '<span class="count-note">' + total + ' طالبًا</span>' : '');
+  }
 }
 
 /* ---------- العرض: الحافلات ---------- */
@@ -216,7 +236,7 @@ function renderBusesGrid() {
 
 /* ---------- العرض: التعيينات ---------- */
 function renderAssignments() {
-  const awaiting = state.students.filter(s => !s.busId && s.mode !== 'private');
+  const awaiting = state.students.filter(s => !s.busId && s.mode !== 'private' && s.mode !== 'walk');
   const countEl = $('#awaitingCount');
   const awaitList = $('#awaitingList');
   const awaitEmpty = $('#awaitingEmpty');
@@ -233,7 +253,9 @@ function renderAssignments() {
         const options = activeBuses.map(b => {
           const used = busCount(b.id);
           const free = b.capacity - used;
-          return '<option value="' + b.id + '">' + escapeHtml(b.plate) + ' (' + free + ' متاح من ' + b.capacity + ')</option>';
+          const disabled = free <= 0 ? ' disabled' : '';
+          return '<option value="' + b.id + '"' + disabled + '>' + escapeHtml(b.plate) +
+            ' (' + (free > 0 ? free + ' متاح' : 'ممتلئ') + ' من ' + b.capacity + ')</option>';
         }).join('');
         return '<div class="await-row">' +
           '<div><b>' + escapeHtml(s.name) + '</b><small>' + escapeHtml(s.schoolId) + ' • ' +
@@ -340,7 +362,7 @@ function saveStudentFromForm() {
     });
   }
 
-  state.students.sort((a, b) => (a.schoolId > b.schoolId ? 1 : -1));
+  sortStudents();
   persist();
   renderAll();
   $('#studentDialog').close();
@@ -398,6 +420,8 @@ function saveBusFromForm() {
   }
 
   state.buses.sort((a, b) => (a.plate > b.plate ? 1 : -1));
+  state.students.sort((a, b) => (a.schoolId > b.schoolId ? 1 : -1));
+  state.visibleStudents = PAGE_SIZE;
   persist();
   renderAll();
   $('#busDialog').close();
@@ -444,7 +468,7 @@ function selectBusForStudent(studentId, selectEl) {
   const bus = findBus(selectEl.value);
   if (!bus) return;
   const free = bus.capacity - busCount(bus.id);
-  if (free <= 0) { toast('لا توجد مقاعد متاحة في حافلة ' + bus.plate); return; }
+  if (free <= 0) { toast('سعة الحافلة ممتلئة: ' + bus.plate); return; }
   assignStudentToBus(studentId, bus.id);
 }
 
@@ -455,6 +479,32 @@ function pickBestBus() {
     if (free > 0 && (!best || free > best.capacity - busCount(best.id))) best = b;
   });
   return best;
+}
+
+/* تعيين تلقائي: كل طالب بلا حافلة (حكومي/غير محدد) يُسند لأفضل حافلة متاحة */
+function autoAssignAll() {
+  const candidates = state.students.filter(s => !s.busId && s.mode !== 'private' && s.mode !== 'walk');
+  if (!candidates.length) { toast('لا يوجد طلاب بانتظار التعيين'); return; }
+  if (!state.buses.length) { toast('أضف حافلات أولًا'); return; }
+
+  let assigned = 0;
+  let failed = 0;
+  candidates.forEach(s => {
+    const bus = pickBestBus();
+    if (bus) {
+      s.busId = bus.id;
+      if (s.mode === 'pending') s.mode = 'government';
+      assigned++;
+    } else {
+      failed++;
+    }
+  });
+
+  persist();
+  renderAll();
+  toast(assigned > 0
+    ? 'حُسّن التوزيع: عُيّن ' + assigned + (failed ? ' طالبًا، ولم يتسع لـ ' + failed : ' طالبًا')
+    : 'لا توجد مقاعد متاحة (لم يُعيّن أحد)');
 }
 
 /* ---------- النسخ الاحتياطي ---------- */
@@ -515,6 +565,8 @@ function importBackup(file) {
 
       state.students = students;
       state.buses = buses;
+      state.visibleStudents = PAGE_SIZE;
+      sortStudents();
       persist();
       renderAll();
       toast('تم الاستيراد: ' + students.length + ' طالب و' + buses.length + ' حافلة');
@@ -530,10 +582,74 @@ function importBackup(file) {
 function resetAllData() {
   state.students = [];
   state.buses = [];
+  state.visibleStudents = PAGE_SIZE;
   persist();
   renderAll();
   $('#resetDialog').close();
   toast('حُذفت كل البيانات');
+}
+
+/* ---------- الاستيراد الجماعي (نسخ ولصق) ---------- */
+const MODE_CODE_MAP = {
+  '': 'pending',
+  government: 'government', 'نقل حكومي': 'government',
+  private: 'private', 'نقل خاص': 'private',
+  walk: 'walk', 'مشيًا': 'walk', 'مشيا': 'walk',
+  pending: 'pending', 'غير محدد': 'pending'
+};
+
+function parseCsvLines(text) {
+  const lines = String(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  return lines.map(line => line.split(/[,;\t]/).map(c => c.trim()));
+}
+
+function handleCsvImport() {
+  const txt = $('#csvInput');
+  if (!txt) return;
+  const rows = parseCsvLines(txt.value);
+  if (!rows.length) { toast('الصق البيانات أولًا'); return; }
+
+  // تخطي سطر العناوين إن وُجد
+  const first = rows[0];
+  const isHeader = first.length >= 2 &&
+    (/^(school|رقم|الرقم|id)/i.test(first[0]) && /^(name|اسم|الاسم)/i.test(first[1]));
+
+  let added = 0;
+  let skipped = 0;
+  let failed = 0;
+  const existing = new Set(state.students.map(s => s.schoolId.toLowerCase()));
+
+  rows.forEach((cells, idx) => {
+    if (idx === 0 && isHeader) return;
+    const schoolId = cells[0] || '';
+    const name = cells[1] || '';
+    if (!schoolId || !name) { failed++; return; }
+    if (existing.has(schoolId.toLowerCase())) { skipped++; return; }
+
+    const grade = GRADES.includes(cells[2]) ? cells[2] : GRADES[0];
+    const section = parseInt(cells[3], 10) || 1;
+    const area = cells[4] || '';
+    const mode = MODE_CODE_MAP[(cells[5] || '').trim()] || 'pending';
+
+    state.students.push({ id: newId(), schoolId, name, grade, section, area, mode, busId: null });
+    existing.add(schoolId.toLowerCase());
+    added++;
+  });
+
+  if (!added) {
+    toast('لم تُضف صفوف (مكررة أو بيانات ناقصة) — أُضيف ' + skipped + ' مكرر و' + failed + ' ناقص');
+    return;
+  }
+
+  sortStudents();
+  persist();
+  renderAll();
+  toast('استيراد: أُضيف ' + added + (skipped ? '، تخطى ' + skipped + ' مكرر' : '') + (failed ? '، ' + failed + ' ناقص' : ''));
+}
+
+function sortStudents() {
+  state.students.sort((a, b) => (a.schoolId > b.schoolId ? 1 : -1));
+  state.buses.sort((a, b) => (a.plate > b.plate ? 1 : -1));
 }
 
 /* ---------- الأحداث ---------- */
@@ -561,13 +677,34 @@ function bindEvents() {
   if (confirmReset) confirmReset.addEventListener('click', resetAllData);
 
   const search = $('#studentSearch');
-  if (search) search.addEventListener('input', () => { state.studentSearch = search.value; renderStudentsTable(); });
+  if (search) search.addEventListener('input', () => {
+    clearTimeout(search._timer);
+    search._timer = setTimeout(() => {
+      state.studentSearch = search.value;
+      state.visibleStudents = PAGE_SIZE;
+      renderStudentsTable();
+    }, SEARCH_DEBOUNCE);
+  });
 
   const modeFilter = $('#modeFilter');
-  if (modeFilter) modeFilter.addEventListener('change', () => { state.modeFilter = modeFilter.value; renderStudentsTable(); });
+  if (modeFilter) modeFilter.addEventListener('change', () => {
+    state.modeFilter = modeFilter.value;
+    state.visibleStudents = PAGE_SIZE;
+    renderStudentsTable();
+  });
 
   const assignFilter = $('#assignFilter');
-  if (assignFilter) assignFilter.addEventListener('change', () => { state.assignFilter = assignFilter.value; renderStudentsTable(); });
+  if (assignFilter) assignFilter.addEventListener('change', () => {
+    state.assignFilter = assignFilter.value;
+    state.visibleStudents = PAGE_SIZE;
+    renderStudentsTable();
+  });
+
+  const csvImportBtn = $('#csvImportBtn');
+  if (csvImportBtn) csvImportBtn.addEventListener('click', handleCsvImport);
+
+  const autoAssignBtn = $('#autoAssignBtn');
+  if (autoAssignBtn) autoAssignBtn.addEventListener('click', autoAssignAll);
 
   const addStudentBtn = $('#addStudentBtn');
   if (addStudentBtn) addStudentBtn.addEventListener('click', () => openStudentDialog(null));
@@ -623,6 +760,13 @@ function bindEvents() {
       return;
     }
 
+    const loadMore = e.target.closest('[data-load-more]');
+    if (loadMore) {
+      state.visibleStudents += PAGE_SIZE;
+      renderStudentsTable();
+      return;
+    }
+
     const unassign = e.target.closest('[data-unassign]');
     if (unassign) {
       const student = findStudent(unassign.dataset.unassign);
@@ -647,8 +791,7 @@ function init() {
   const data = loadData();
   state.students = data.students;
   state.buses = data.buses;
-  state.students.sort((a, b) => (a.schoolId > b.schoolId ? 1 : -1));
-  state.buses.sort((a, b) => (a.plate > b.plate ? 1 : -1));
+  sortStudents();
   bindEvents();
   renderAll();
 }
